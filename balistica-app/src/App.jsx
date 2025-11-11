@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, RotateCcw, Target } from 'lucide-react';
+import { Play, Pause, RotateCcw, Target, Info } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 const Balistica = () => {
@@ -10,13 +10,48 @@ const Balistica = () => {
     jupiter: { name: 'Júpiter', g: 24.8, emoji: '🌕' }
   };
 
-  // Configuraciones de medio (resistencia)
+  // Configuraciones de medio (resistencia) - MODELO CUADRÁTICO
   const mediumOptions = {
-    vacio: { name: 'Vacío', k: 0, filter: 'none' },
-    aire: { name: 'Aire Normal', k: 0.02, filter: 'none' },
-    viento: { name: 'Viento Fuerte', k: 0.08, filter: 'grayscale(0.3) brightness(0.9)' },
-    agua: { name: 'Agua', k: 5.0, filter: 'sepia(0.3) hue-rotate(180deg) saturate(1.5)' },
-    aceite: { name: 'Aceite', k: 8.0, filter: 'sepia(0.6) hue-rotate(20deg) saturate(1.2)' }
+    vacio: { 
+      name: 'Vacío', 
+      density: 0,        // kg/m³
+      dragCoeff: 0,      // Coeficiente de arrastre
+      crossArea: 0.01,   // m²
+      filter: 'none',
+      description: 'Sin resistencia del aire'
+    },
+    aire: { 
+      name: 'Aire Normal', 
+      density: 1.225,    // kg/m³
+      dragCoeff: 0.47,   // Para una esfera
+      crossArea: 0.01,   // m²
+      filter: 'none',
+      description: 'Condiciones atmosféricas estándar'
+    },
+    viento: { 
+      name: 'Viento Fuerte', 
+      density: 1.5,      // kg/m³ (aire más denso/turbulento)
+      dragCoeff: 0.47,
+      crossArea: 0.01,
+      filter: 'grayscale(0.3) brightness(0.9)',
+      description: 'Aire con mayor densidad por viento'
+    },
+    agua: { 
+      name: 'Agua', 
+      density: 1000,     // kg/m³
+      dragCoeff: 0.5,    // Para objeto en agua
+      crossArea: 0.01,
+      filter: 'sepia(0.3) hue-rotate(180deg) saturate(1.5)',
+      description: 'Medio acuático - alta resistencia'
+    },
+    aceite: { 
+      name: 'Aceite', 
+      density: 900,      // kg/m³
+      dragCoeff: 0.6,    // Mayor coeficiente por viscosidad
+      crossArea: 0.01,
+      filter: 'sepia(0.6) hue-rotate(20deg) saturate(1.2)',
+      description: 'Fluido viscoso - resistencia muy alta'
+    }
   };
 
   // Estados de parámetros
@@ -26,7 +61,7 @@ const Balistica = () => {
   const [selectedGravity, setSelectedGravity] = useState('tierra');
   const [selectedMedium, setSelectedMedium] = useState('aire');
   const [gravity, setGravity] = useState(9.8);
-  const [k, setK] = useState(0.02);
+  const [currentMedium, setCurrentMedium] = useState(mediumOptions.aire);
 
   const [targetX, setTargetX] = useState(50);
   const [targetY, setTargetY] = useState(0);
@@ -91,31 +126,39 @@ const Balistica = () => {
   // Cambiar medio
   const handleMediumChange = (mediumKey) => {
     setSelectedMedium(mediumKey);
-    setK(mediumOptions[mediumKey].k);
+    setCurrentMedium(mediumOptions[mediumKey]);
     setVerificationResult(null);
     setUserTerminalVelocity('');
     handleReset();
   };
 
-  // Calcular velocidad terminal teórica
+  // Calcular velocidad terminal teórica - MODELO CUADRÁTICO
   const calculateTerminalVelocity = () => {
-    if (k === 0) {
+    const medium = mediumOptions[selectedMedium];
+    
+    if (medium.density === 0) {
       return null; // No hay velocidad terminal en el vacío
     }
-    // Modelo de resistencia lineal (Ley de Stokes): F_d = -k*v
-    // Velocidad terminal vertical: v_t = (m * g) / k
-    const vt = (mass * gravity) / k;
+    
+    // Modelo de resistencia cuadrático: F_drag = ½·ρ·v²·C_d·A
+    // Velocidad terminal: v_terminal = √(2mg / (ρ·C_d·A))
+    const vt = Math.sqrt(
+      (2 * mass * gravity) / 
+      (medium.density * medium.dragCoeff * medium.crossArea)
+    );
+    
     return vt;
   };
 
   // Verificar velocidad terminal ingresada por el usuario
   const handleVerifyTerminalVelocity = () => {
     const theoretical = calculateTerminalVelocity();
+    const medium = mediumOptions[selectedMedium];
     
     if (theoretical === null) {
       setVerificationResult({
         type: 'info',
-        message: 'En el vacío (k=0) no existe velocidad terminal. El proyectil acelera indefinidamente bajo la gravedad.'
+        message: 'En el vacío (ρ=0) no existe velocidad terminal. El proyectil acelera indefinidamente bajo la gravedad.'
       });
       setCalculatedTerminalVelocity(null);
       return;
@@ -133,15 +176,15 @@ const Balistica = () => {
       return;
     }
     
-    // Tolerancia del 3%
-    const tolerance = theoretical * 0.03;
+    // Tolerancia del 5% (más flexible para cálculos complejos)
+    const tolerance = theoretical * 0.05;
     const difference = Math.abs(userValue - theoretical);
     const percentError = (difference / theoretical) * 100;
     
     if (difference <= tolerance) {
       setVerificationResult({
         type: 'success',
-        message: `¡Correcto! Tu cálculo está dentro del margen de error aceptable (±3%).`,
+        message: `¡Correcto! Tu cálculo está dentro del margen de error aceptable (±5%).`,
         theoretical: theoretical,
         userValue: userValue,
         error: percentError
@@ -149,7 +192,7 @@ const Balistica = () => {
     } else {
       setVerificationResult({
         type: 'error',
-        message: `Incorrecto. El error es del ${percentError.toFixed(2)}%. Revisa tu cálculo usando la fórmula del modelo lineal.`,
+        message: `Incorrecto. El error es del ${percentError.toFixed(2)}%. Revisa tu cálculo usando la fórmula del modelo cuadrático.`,
         theoretical: theoretical,
         userValue: userValue,
         error: percentError
@@ -157,16 +200,27 @@ const Balistica = () => {
     }
   };
 
-  // Resolver ecuaciones diferenciales usando método de Runge-Kutta 4 (RK4)
-  const updatePhysics = (state, dt, m, g, k) => {
+  // Resolver ecuaciones diferenciales usando método de Runge-Kutta 4 (RK4) - MODELO CUADRÁTICO
+  const updatePhysics = (state, dt, m, g, medium) => {
     const { x, y, vx, vy } = state;
     
     // Función para calcular las derivadas
     const derivatives = (vx_curr, vy_curr) => {
       const speed = Math.sqrt(vx_curr ** 2 + vy_curr ** 2);
-      // Resistencia del aire proporcional a la velocidad y su dirección
-      const dvx_dt = -(k / m) * vx_curr;
-      const dvy_dt = -g - (k / m) * vy_curr;
+      
+      if (medium.density === 0) {
+        // Vacío - solo gravedad
+        return { dvx: 0, dvy: -g, dx: vx_curr, dy: vy_curr };
+      }
+      
+      // Resistencia del aire MODELO CUADRÁTICO: F_drag = ½·ρ·v²·C_d·A
+      const dragForce = 0.5 * medium.density * medium.dragCoeff * medium.crossArea * speed * speed;
+      const dragAcceleration = dragForce / m;
+      
+      // Componentes de la aceleración por resistencia
+      const dvx_dt = -(dragAcceleration * (vx_curr / speed));
+      const dvy_dt = -g - (dragAcceleration * (vy_curr / speed));
+      
       return { dvx: dvx_dt, dvy: dvy_dt, dx: vx_curr, dy: vy_curr };
     };
 
@@ -247,46 +301,47 @@ const Balistica = () => {
     const step = () => {
       if (!isPaused) {
         const state = stateRef.current;
+        const medium = mediumOptions[selectedMedium];
         
-        // Actualizar física
-        const newState = updatePhysics(state, dt, mass, gravity, k);
+        // Actualizar física con modelo cuadrático
+        const newState = updatePhysics(state, dt, mass, gravity, medium);
         newState.t = state.t + dt;
 
-        //Verificar impacto con el blanco DURANTE EL VUELO (antes de tocar suelo)
-      const distance = Math.sqrt(
-        Math.pow(newState.x - targetX, 2) + 
-        Math.pow(newState.y - targetY, 2)
-      );
-      
-      // Si impacta el blanco (radio de 3m)
-      if (distance < 3) {
-        stateRef.current = newState;
-        setIsRunning(false);
-        setHitTarget(true);
+        // Verificar impacto con el blanco DURANTE EL VUELO (antes de tocar suelo)
+        const distance = Math.sqrt(
+          Math.pow(newState.x - targetX, 2) + 
+          Math.pow(newState.y - targetY, 2)
+        );
         
-        // Calcular velocidad final
-        const speed = Math.sqrt(newState.vx ** 2 + newState.vy ** 2);
-        setCurrentData({
-          t: newState.t,
-          x: newState.x,
-          y: newState.y,
-          vx: newState.vx,
-          vy: newState.vy,
-          speed: speed
-        });
-        
-        // Agregar punto final a la trayectoria
-        setTrajectoryData(prev => [...prev, {
-          x: newState.x,
-          y: newState.y,
-          t: newState.t,
-          vx: newState.vx,
-          vy: newState.vy
-        }]);
-        
-        return; // Detener inmediatamente
-      }
-        
+        // Si impacta el blanco (radio de 3m)
+        if (distance < 3) {
+          stateRef.current = newState;
+          setIsRunning(false);
+          setHitTarget(true);
+          
+          // Calcular velocidad final
+          const speed = Math.sqrt(newState.vx ** 2 + newState.vy ** 2);
+          setCurrentData({
+            t: newState.t,
+            x: newState.x,
+            y: newState.y,
+            vx: newState.vx,
+            vy: newState.vy,
+            speed: speed
+          });
+          
+          // Agregar punto final a la trayectoria
+          setTrajectoryData(prev => [...prev, {
+            x: newState.x,
+            y: newState.y,
+            t: newState.t,
+            vx: newState.vx,
+            vy: newState.vy
+          }]);
+          
+          return; // Detener inmediatamente
+        }
+          
         // Verificar si toca el suelo
         if (newState.y < 0) {
           newState.y = 0;
@@ -352,15 +407,18 @@ const Balistica = () => {
     }
   }, [isPaused]);
 
+  // Información del medio actual
+  const currentMediumInfo = mediumOptions[selectedMedium];
+
   return (
     <div className={`min-h-screen ${getBackground()} p-4`}>
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="bg-white/90 backdrop-blur rounded-lg shadow-lg p-6 mb-4">
           <h1 className="text-4xl font-bold text-gray-800 mb-2 flex items-center gap-2">
-            🏹 Balística
+            🏹 Simulador Balístico Avanzado
           </h1>
-          <p className="text-gray-600">Simulador de movimiento de proyectiles con resistencia del aire</p>
+          <p className="text-gray-600">Simulador de movimiento de proyectiles con resistencia del aire (Modelo Cuadrático)</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -393,7 +451,7 @@ const Balistica = () => {
 
             {/* Selección de Medio */}
             <div className="mb-4">
-              <label className="block text-sm font-semibold mb-2">💨 Medio (Resistencia)</label>
+              <label className="block text-sm font-semibold mb-2">💨 Medio (Resistencia Cuadrática)</label>
               <select 
                 value={selectedMedium}
                 onChange={(e) => handleMediumChange(e.target.value)}
@@ -402,13 +460,20 @@ const Balistica = () => {
               >
                 {Object.entries(mediumOptions).map(([key, val]) => (
                   <option key={key} value={key}>
-                    {val.name} (k = {val.k} s⁻¹)
+                    {val.name} (ρ={val.density} kg/m³)
                   </option>
                 ))}
               </select>
+              <div className="mt-2 text-xs text-gray-600 bg-gray-50 p-2 rounded">
+                <strong>Medio actual:</strong> {currentMediumInfo.description}
+                <br />
+                <strong>Parámetros:</strong> ρ={currentMediumInfo.density} kg/m³, 
+                C_d={currentMediumInfo.dragCoeff}, 
+                A={currentMediumInfo.crossArea} m²
+              </div>
             </div>
 
-            {/* Parámetros de la Flecha */}
+            {/* Parámetros del Proyectil */}
             <div className="mb-4">
               <label className="block text-sm font-semibold mb-1">Masa (kg): {mass.toFixed(2)}</label>
               <input 
@@ -421,6 +486,9 @@ const Balistica = () => {
                 className="w-full"
                 disabled={isRunning}
               />
+              <div className="text-xs text-gray-500 mt-1">
+                Masa del proyectil - afecta la inercia y velocidad terminal
+              </div>
             </div>
 
             <div className="mb-4">
@@ -435,6 +503,9 @@ const Balistica = () => {
                 className="w-full"
                 disabled={isRunning}
               />
+              <div className="text-xs text-gray-500 mt-1">
+                Velocidad inicial del disparo
+              </div>
             </div>
 
             <div className="mb-4">
@@ -449,6 +520,9 @@ const Balistica = () => {
                 className="w-full"
                 disabled={isRunning}
               />
+              <div className="text-xs text-gray-500 mt-1">
+                Ángulo de disparo respecto a la horizontal
+              </div>
             </div>
 
             {/* Configuración del Blanco */}
@@ -479,6 +553,9 @@ const Balistica = () => {
                 className="w-full"
                 disabled={isRunning}
               />
+              <div className="text-xs text-gray-500 mt-1">
+                Posición del blanco - radio de impacto: 3m
+              </div>
             </div>
 
             {/* Controles */}
@@ -517,30 +594,53 @@ const Balistica = () => {
               </div>
             )}
 
-            {/* Verificación de Velocidad Terminal */}
+            {/* Verificación de Velocidad Terminal - MEJORADA */}
             <div className="mt-6 border-t pt-4">
               <div className="bg-purple-50 p-4 rounded-lg border-2 border-purple-200">
-                <p className="text-sm text-gray-700 mb-3">
-                  <strong>Modelo usado:</strong> Resistencia lineal (Stokes)<br/>
-                  <strong>Fórmula:</strong> <span className="font-mono bg-white px-2 py-1 rounded">v_t = (m × g) / k</span>
-                </p>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-bold text-gray-700">
+                    🎯 Velocidad Terminal (Modelo Cuadrático)
+                  </p>
+                  <button
+                    onClick={() => setShowTerminalTheory(!showTerminalTheory)}
+                    className="text-purple-600 hover:text-purple-800"
+                  >
+                    <Info size={16} />
+                  </button>
+                </div>
                 
-                <div className="grid grid-cols-3 gap-2 mb-3 text-sm bg-white p-2 rounded">
+                {showTerminalTheory && (
+                  <div className="mb-3 p-3 bg-white rounded border border-purple-200 text-xs">
+                    <p className="font-bold mb-2">📚 Teoría - Modelo Cuadrático:</p>
+                    <p><strong>Fuerza de resistencia:</strong> Fₐ = ½·ρ·v²·Cₕ·A</p>
+                    <p><strong>Velocidad terminal:</strong> vₜ = √[2mg / (ρ·Cₕ·A)]</p>
+                    <p className="mt-1 text-gray-600">
+                      Donde: ρ = densidad, Cₕ = coeficiente de arrastre, A = área transversal,
+                      m = masa, g = gravedad
+                    </p>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-4 gap-2 mb-3 text-sm bg-white p-2 rounded text-xs">
                   <div>
-                    <p className="text-xs text-gray-600">Masa (m)</p>
+                    <p className="text-gray-600">Masa (m)</p>
                     <p className="font-bold">{mass.toFixed(2)} kg</p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-600">Gravedad (g)</p>
+                    <p className="text-gray-600">Gravedad (g)</p>
                     <p className="font-bold">{gravity.toFixed(1)} m/s²</p>
                   </div>
                   <div>
-                    <p className="text-xs text-gray-600">Coef. k</p>
-                    <p className="font-bold">{k.toFixed(3)} s⁻¹</p>
+                    <p className="text-gray-600">Densidad (ρ)</p>
+                    <p className="font-bold">{currentMediumInfo.density} kg/m³</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-600">Cₕ·A</p>
+                    <p className="font-bold">{(currentMediumInfo.dragCoeff * currentMediumInfo.crossArea).toFixed(4)} m²</p>
                   </div>
                 </div>
 
-                <label className="block text-sm font-semibold mb-2">Tu cálculo de v_terminal (m/s):</label>
+                <label className="block text-sm font-semibold mb-2">Tu cálculo de vₜerminal (m/s):</label>
                 <input
                   type="number"
                   step="0.01"
@@ -557,7 +657,7 @@ const Balistica = () => {
                   ✓ Verificar Cálculo
                 </button>
 
-                {/* Resultado de verificación */}
+                {/* Resultado de verificación MEJORADO */}
                 {verificationResult && (
                   <div className={`mt-3 p-3 rounded-lg border-2 ${
                     verificationResult.type === 'success' 
@@ -578,17 +678,27 @@ const Balistica = () => {
                     </p>
                     
                     {verificationResult.theoretical !== undefined && (
-                      <div className="text-sm space-y-1 mt-2 bg-white p-2 rounded">
+                      <div className="text-sm space-y-1 mt-2 bg-white p-2 rounded text-xs">
                         <p><strong>Tu respuesta:</strong> {verificationResult.userValue.toFixed(3)} m/s</p>
                         <p><strong>Valor teórico:</strong> {verificationResult.theoretical.toFixed(3)} m/s</p>
                         <p><strong>Diferencia:</strong> {Math.abs(verificationResult.userValue - verificationResult.theoretical).toFixed(3)} m/s ({verificationResult.error.toFixed(2)}%)</p>
-                        <div className="mt-2 pt-2 border-t">
-                          <p className="font-mono text-xs">v_t = ({mass} × {gravity}) / {k}</p>
-                          <p className="font-mono text-xs">v_t = {(mass * gravity).toFixed(3)} / {k}</p>
-                          <p className="font-mono text-xs font-bold text-purple-700">v_t = {verificationResult.theoretical.toFixed(3)} m/s</p>
+                        <div className="mt-2 pt-2 border-t font-mono">
+                          <p>vₜ = √[2 × {mass} × {gravity} / ({currentMediumInfo.density} × {currentMediumInfo.dragCoeff} × {currentMediumInfo.crossArea})]</p>
+                          <p>vₜ = √[{2 * mass * gravity} / {currentMediumInfo.density * currentMediumInfo.dragCoeff * currentMediumInfo.crossArea}]</p>
+                          <p>vₜ = √[{(2 * mass * gravity) / (currentMediumInfo.density * currentMediumInfo.dragCoeff * currentMediumInfo.crossArea)}]</p>
+                          <p className="font-bold text-purple-700">vₜ = {verificationResult.theoretical.toFixed(3)} m/s</p>
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Mostrar velocidad terminal teórica actual */}
+                {selectedMedium !== 'vacio' && (
+                  <div className="mt-3 p-2 bg-blue-50 rounded border border-blue-200 text-xs">
+                    <p className="font-semibold text-blue-800">
+                      💡 Velocidad terminal teórica actual: {calculateTerminalVelocity()?.toFixed(2) || 'N/A'} m/s
+                    </p>
                   </div>
                 )}
               </div>
@@ -633,7 +743,7 @@ const Balistica = () => {
               <h3 className="text-xl font-bold mb-4 text-gray-800">⁀➴ Campo de Tiro</h3>
               <div 
                 className={`relative w-full h-96 ${getBackground()} rounded-lg border-4 border-gray-700 overflow-hidden`}
-                style={{ filter: mediumOptions[selectedMedium].filter }}
+                style={{ filter: currentMediumInfo.filter }}
               >
                 {/* Estrellas para espacio */}
                 {isSpace() && (
